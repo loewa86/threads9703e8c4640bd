@@ -7,7 +7,7 @@ setup(
     install_requires=[
         "exorde_data",
         "selenium==4.2.0",
-        "beautifulsoup==4.12.3",
+        "beautifulsoup4==4.12.3",
         "requests"
     ],
     extras_require={"dev": ["pytest", "pytest-cov", "pytest-asyncio"]},
