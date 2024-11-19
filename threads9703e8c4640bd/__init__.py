@@ -287,6 +287,9 @@ def check_and_kill_processes(process_names):
             logging.info(f"[Chrome] No running processes found for: {process_name}")
 
 
+def convert_spaces_to_percent20(input_string):
+    return input_string.replace(" ", "%20")
+
 async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
     max_oldness_seconds, maximum_items_to_collect, min_post_length = read_parameters(parameters)
     yielded_items = 0
@@ -332,9 +335,11 @@ async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
 
     ############################
     since = calculate_since(max_oldness_seconds)  
-    
+    consecutive_misses = 0
     try:
         for _ in range(3):
+            # random sleep between 0.5 and 2 seconds
+            await asyncio.sleep(random.uniform(0.5, 2))
             if yielded_items >= maximum_items_to_collect:
                 break
             if keywords_list is not None and keywords_list != []:
@@ -345,6 +350,8 @@ async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
                 search_keyword = random.choice(BASE_KEYWORDS)
                 logging.info(f"[Threads parameters] using base keyword: {search_keyword}")
 
+            # add &filter=recent 95% of the time
+            search_keyword = convert_spaces_to_percent20(search_keyword)
             # add &filter=recent 95% of the time
             effective_URL = BASE_THREADS_URL + f"/search?q={search_keyword}"
             if random.random() > 0.05: # 95% of the time we want to filter by recent, 5% of the time we look at top items
@@ -361,6 +368,11 @@ async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
             logging.info(f"[Threads] Fetching posts for keyword '{search_keyword}' since {since}")
             if posts is None:
                 logging.info(f"[Threads] No posts found for this keyword. Moving on.")
+                consecutive_misses += 1
+                # if we have 3 consecutive misses, we stop, sleep randomly between 3 and 10 seconds
+                if consecutive_misses >= 3:
+                    await asyncio.sleep(random.randint(3, 10))
+                    break
                 continue
 
             for post in posts:
@@ -374,6 +386,8 @@ async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
                     display_content = post['content'][:250].replace("\n", " ")
                     logging.info(f"[Threads] Found post: {post['url']} created at {post['created_at']} with content: {display_content} by authorID: {post['author']}")
                     yielded_items += 1
+                    # reset consecutive_misses
+                    consecutive_misses = 0
                     yield post
                 except Exception as e:
                     logging.exception(f"[Threads] Error processing post: {e}")
