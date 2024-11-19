@@ -364,7 +364,7 @@ async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
             # sleep 1s
             driver.implicitly_wait(2)
             # random sleep between 0.1 and 1 second
-            await asyncio.sleep(random.uniform(0.1, 1))
+            await asyncio.sleep(random.uniform(0.5, 2))
             
             # Your automation code goes here
             posts = find_posts(driver)
