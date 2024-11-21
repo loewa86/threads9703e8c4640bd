@@ -212,7 +212,7 @@ def find_posts(driver):
     html_content = driver.page_source 
     # DEBUG
     soup = BeautifulSoup(html_content, 'html.parser')
-    logging.info(f"\n[Threads] ************ HTML content length: {len(html_content)}")
+    logging.info(f"[Threads] *** HTML content length: {len(html_content)} ***")
     items = []
 
     # Find all thread items
@@ -313,6 +313,42 @@ def check_and_kill_processes(process_names):
             logging.info(f"[Chrome] No running processes found for: {process_name}")
 
 
+def human_like_scroll(driver,max_scrolls=5):
+    # Simulate human-like scrolling behavior
+    total_scroll_distance = random.randint(300, 1500)  # Total scroll distance varies
+    scroll_segments = random.randint(1, max_scrolls)  # Number of scroll actions
+    
+    for _ in range(scroll_segments):
+        # Randomize scroll direction (mostly down, sometimes up)
+        direction = 1 if random.random() < 0.9 else -1
+        
+        # Randomize scroll distance for each segment
+        scroll_distance = direction * random.randint(100, 400)
+        
+        # Adjust total scroll to stay within reasonable bounds
+        if total_scroll_distance + scroll_distance > 3000:
+            scroll_distance = max(3000 - total_scroll_distance, 0)
+        elif total_scroll_distance + scroll_distance < 0:
+            scroll_distance = -total_scroll_distance
+        
+        total_scroll_distance += scroll_distance
+        
+        # Execute scroll with easing function for more natural movement
+        driver.execute_script(f"""
+            window.scrollTo({{
+                top: window.pageYOffset + {scroll_distance},
+                behavior: 'smooth'
+            }});
+        """)
+        
+        # Random pause between scrolls (slightly longer after scrolling up)
+        pause_time = random.uniform(0.2, 15) + (0.5 if direction == -1 else 0)
+        time.sleep(pause_time)
+    
+    # Occasional longer pause to simulate reading
+    if random.random() < 0.2:
+        time.sleep(random.uniform(1, 5))
+
 def convert_spaces_to_percent20(input_string):
     return input_string.replace(" ", "%20")
 
@@ -321,7 +357,7 @@ async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
     yielded_items = 0
 
     # sleep randomly between 1 and 5 seconds
-    time.sleep(random.randint(0, 1))
+    time.sleep(random.randint(3, 10))
     
     # Cleanup old chromium processes
     try:
@@ -350,7 +386,6 @@ async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
 
     ######################
     #### CHROME SETUP ####
-    # path_driver = "C:\\Users\\mathi\\OneDrive\\Bureau\\scrapers_test\\chromedriver\\chromedriver.exe"
     path_driver = '/usr/local/bin/chromedriver'
     service = Service(path_driver)
     options = setup_chrome_options()    
@@ -359,9 +394,9 @@ async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
     since = calculate_since(max_oldness_seconds)
     consecutive_misses = 0
     try:
-        for _ in range(3):
-            # random sleep between 0.5 and 2 seconds
-            time.sleep(random.uniform(1.1, 3.4))
+        nb_searches = random.randint(1, 5)
+        for _ in range(nb_searches):
+            time.sleep(random.uniform(1.5, 4.1))
             if yielded_items >= maximum_items_to_collect:
                 break
             if keywords_list is not None and keywords_list != []:
@@ -384,7 +419,7 @@ async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
             ## 1.a. try to accept cookies
             # sleep 3s
             if _ == 0:
-                time.sleep(2)
+                time.sleep(random.uniform(2, 4))
                 try:
                     timeout = 5
                     # Find the last div with the specific classes
@@ -398,27 +433,23 @@ async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
                     # Use ActionChains to move to the element and click with a small delay
                     actions = ActionChains(driver)
                     actions.move_to_element(button)
-                    time.sleep(random.uniform(0.01, 0.2))  # Random delay between 0.1 seconds
+                    time.sleep(random.uniform(0.07, 0.42))  # Random delay between 0.1 seconds
                     actions.click(button).perform()
                     logging.info("[Threads] Cookie banner button clicked using ActionChains")
                 except Exception as e:
                     logging.error(f"[Threads] Error clicking cookie banner button with ActionChains.")
             else:
-                time.sleep(0.7)
+                time.sleep(2)
 
 
             # 1.b scroll a little bit
-            nb_scrolls = random.randint(1, 3)
-            for _ in range(nb_scrolls):
-                driver.execute_script ("window.scrollTo(0, Math.floor(Math.random() * 500) + 200);")
-                # random wait between 2 and 5 seconds
-                delay = round(random.uniform(1, 2.1),2)
-                time.sleep(delay)
+            human_like_scroll(driver,2)
             
             logging.info("[Threads] Scrolling done, waiting for search button to be clickable")
 
             # Wait for the search button to be clickable
-            max_retries = 3
+            max_retries = 2
+            
             for attempt in range(max_retries):
                 try:
                     search_button = WebDriverWait(driver, 1).until(
@@ -430,20 +461,40 @@ async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
                 except TimeoutException:
                     if attempt == max_retries - 1:
                         raise
-                    print(f"Attempt {attempt + 1} failed, retrying...")
+                    time.sleep(int(attempt + 1))
+                    print(f"Search bar Attempt {attempt + 1} failed, retrying...")          
+                    logging.info("[Threads] Search bar is unavailable ***")
+            
 
             # 3. Click on the search button
             search_button.click()
             logging.info("[Threads] Clicked on the search button")
             logging.info(f"[Threads] Current URL: {driver.current_url}")
             # 3.a Wait for the URL to change to the search page
-            WebDriverWait(driver, 5).until(
-                EC.url_to_be("https://www.threads.net/search")
-            )
+            
+            max_retries = 2
+            for attempt in range(max_retries):
+                try:
+                    WebDriverWait(driver, 5).until(
+                        EC.url_to_be("https://www.threads.net/search")
+                    )
+                except TimeoutException:
+                    if attempt == max_retries - 1:
+                        raise
+                    logging.info("[Threads] Search bar is unavailable ***")
+                    search_button.click()
+                    logging.info(f"[Threads] Clicked on the search button, attempt {attempt + 1}")
+                            
+
+            # if still not on search, we stop and quit.
+            if driver.current_url != "https://www.threads.net/search":
+                logging.info("[Threads] Not on search page, quitting.")
+                break
             logging.info("[Threads] URL changed to the search page")
+                           
 
             # 4. TYPE THE SEARCH KEYWORD ORGANICALLY
-            time.sleep(random.uniform(0.01, 0.1))
+            time.sleep(random.uniform(0.4, 1.2))
             # find the first <input class="x1i10hfl x9f619 xggy1nq x1s07b3s x1kdt53j x1a2a7pz x1ggkfyp x972fbf xcfux6l x1qhh985 xm0m39n xp07o12 x1i0vuye xjohtrz x5yr21d x1yc453h xh8yej3 x1e899rk x1bn1fsv xtilpmw x1ad04t7 x1glnyev x1ix68h3 x19gujb8" dir="ltr" autocapitalize="off" autocomplete="off" placeholder="Search" spellcheck="false" type="search" value="" tabindex="0"> 
             # look for the first "input" element with  type="search"
             try:
@@ -452,21 +503,17 @@ async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
                 # type the search keyword with a delay between each character of 0.05s & 0.15s
                 for letter in search_keyword:
                     search_input.send_keys(letter)
-                    time.sleep(random.uniform(0.04, 0.25))
+                    time.sleep(random.uniform(0.07, 0.42))
                 search_input.send_keys(Keys.RETURN)
             except:
                 print("No parent form element found.")
 
             time.sleep(random.uniform(0.2, 2))
             # 4.b scroll a little bit
-            nb_scrolls = random.randint(1, 6)
-            for _ in range(nb_scrolls):
-                driver.execute_script ("window.scrollTo(0, Math.floor(Math.random() * 600) + 340);")
-                # random wait between 0 and 1 seconds
-                delay = round(random.uniform(1, 2.1),2)
-                time.sleep(delay)
+            human_like_scroll(driver,4)
             
-            # Your automation code goes here
+            
+            # 5. EXTRACT POSTS
             posts = find_posts(driver)
             logging.info(f"[Threads] Fetching posts for keyword '{search_keyword}' since {since}")
             if posts is None:
@@ -474,7 +521,7 @@ async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
                 consecutive_misses += 1
                 # if we have 3 consecutive misses, we stop, sleep randomly between 3 and 10 seconds
                 if consecutive_misses >= 3:
-                    await time.sleep(random.randint(1, 2))
+                    await time.sleep(int(consecutive_misses + 1))
                     break
                 continue
 
@@ -498,3 +545,4 @@ async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
         logging.exception(f"[Threads] Error processing posts: {e}")
     finally:
         driver.quit()
+    
