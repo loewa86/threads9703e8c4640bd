@@ -1,8 +1,3 @@
-import subprocess
-import hashlib
-import shutil
-import asyncio
-import os
 import random
 import logging
 import requests
@@ -10,13 +5,26 @@ from typing import AsyncGenerator, Any, Dict
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
+import subprocess
+import shutil
+import time
+import hashlib
+import os
+import re
 from exorde_data import (
     Item,
     Content,
     Author,
     CreatedAt,
+    ExternalId,
     Url,
     Domain,
 )
@@ -53,6 +61,7 @@ BASE_KEYWORDS = [
 user_agents = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
     # Add more user agents as needed
 ]
 
@@ -78,16 +87,29 @@ def setup_chrome_options():
     options.add_argument("--disable-blink-features")
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("excludeSwitches", ["enable-logging"])
     options.add_experimental_option("useAutomationExtension", False)
     options.add_argument("--disable-dev-shm-usage")
-    
-    # Set a random user agent
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--start-maximized")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-gpu")
+        
+    # # Set a random user agent
     selected_user_agent = random.choice(user_agents)
     options.add_argument(f"user-agent={selected_user_agent}")
-    logging.info(f"Selected user agent: {selected_user_agent}")
+    # logging.info(f"Selected user agent: {selected_user_agent}")
 
+    # make it 'en' by default, localized content can be a problem
+    options.add_argument("--lang=en")
+    # Disable notifications
+    options.add_argument("--disable-notifications")
+    # auto accept all cookies
+    options.add_argument("--profile-directory=Default")
+    options.add_argument("--disable-popup-blocking")
+    
     # add headless mode
-    options.add_argument("--headless")
+    options.add_argument("--headless=new")  # Try the new headles
     
     return options
 
@@ -187,12 +209,15 @@ def calculate_since(max_oldness_seconds: int) -> str:
 def find_posts(driver):
     # Assuming the HTML content is stored in a variable called 'html_content'
     # use selenium driver to get current page source
-    html_content = driver.page_source
+    html_content = driver.page_source 
+    # DEBUG
     soup = BeautifulSoup(html_content, 'html.parser')
+    logging.info(f"\n[Threads] ************ HTML content length: {len(html_content)}")
     items = []
 
     # Find all thread items
     thread_items = soup.find_all('div', class_='x1a2a7pz x1n2onr6')
+    logging.info(f"[Threads] Found {len(thread_items)} potential items. ****")
     # print if we found any thread items
     if not thread_items:
         print("No thread items found.")
@@ -294,6 +319,9 @@ def convert_spaces_to_percent20(input_string):
 async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
     max_oldness_seconds, maximum_items_to_collect, min_post_length = read_parameters(parameters)
     yielded_items = 0
+
+    # sleep randomly between 1 and 5 seconds
+    time.sleep(random.randint(0, 1))
     
     # Cleanup old chromium processes
     try:
@@ -320,27 +348,20 @@ async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
         logging.exception(f"[Threads parameters] Keywords list fetch failed: {e}")
         keywords_list = None
 
-    ############################
-    # DEBUG
-    # Set up ChromeDriver   
-    # from webdriver_manager.chrome import ChromeDriverManager
-    # service = Service(ChromeDriverManager().install())    
-    # # Set up Chrome options
-    # options = setup_chrome_options()    
-    # driver = webdriver.Chrome(service=service, options=options)
-
-    driver_path = '/usr/local/bin/chromedriver'
-    logging.info(f"Opening driver from path = {driver_path}")
+    ######################
+    #### CHROME SETUP ####
+    # path_driver = "C:\\Users\\mathi\\OneDrive\\Bureau\\scrapers_test\\chromedriver\\chromedriver.exe"
+    path_driver = '/usr/local/bin/chromedriver'
+    service = Service(path_driver)
     options = setup_chrome_options()    
-    driver = webdriver.Chrome(service=Service(driver_path), options=options)
-
-    ############################
-    since = calculate_since(max_oldness_seconds)  
+    driver = webdriver.Chrome(service=service, options=options)
+    ######################
+    since = calculate_since(max_oldness_seconds)
     consecutive_misses = 0
     try:
         for _ in range(3):
             # random sleep between 0.5 and 2 seconds
-            await asyncio.sleep(random.uniform(0.5, 2))
+            time.sleep(random.uniform(1.1, 3.4))
             if yielded_items >= maximum_items_to_collect:
                 break
             if keywords_list is not None and keywords_list != []:
@@ -351,20 +372,99 @@ async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
                 search_keyword = random.choice(BASE_KEYWORDS)
                 logging.info(f"[Threads parameters] using base keyword: {search_keyword}")
 
-            # add &filter=recent 95% of the time
-            search_keyword = convert_spaces_to_percent20(search_keyword)
-            # add &filter=recent 95% of the time
-            effective_URL = BASE_THREADS_URL + f"/search?q={search_keyword}"
-            if random.random() > 0.05: # 95% of the time we want to filter by recent, 5% of the time we look at top items
-                effective_URL += "&filter=recent"
+            # Preprocess the search keyword: remove any leading/trailing whitespace, remove any newlines
+            search_keyword = search_keyword.strip().replace("\n", "")
+            # if here is a (*) pattern, remove it. ex: Le Bitcoin (btc) ->  Le Bitcoin
+            search_keyword = re.sub(r'\s*\([^)]*\)', '', search_keyword)
 
-            # Open a webpage
-            logging.info(f"[Threads] Opening URL: {effective_URL}")
-            driver.get(effective_URL)
-            # sleep 1s
-            driver.implicitly_wait(2)
-            # random sleep between 0.1 and 1 second
-            await asyncio.sleep(random.uniform(0.5, 2))
+            ## 1. FIRST WE GO TO HOME PAGE
+            logging.info(f"[Threads] Opening Home URL: {BASE_THREADS_URL}")
+            driver.get(BASE_THREADS_URL)
+
+            ## 1.a. try to accept cookies
+            # sleep 3s
+            if _ == 0:
+                time.sleep(2)
+                try:
+                    timeout = 5
+                    # Find the last div with the specific classes
+                    last_div = WebDriverWait(driver, timeout).until(
+                        EC.presence_of_element_located((By.XPATH, "(//div[contains(@class, 'x6bh95i') and contains(@class, 'x13fuv20') and contains(@class, 'x178xt8z') and contains(@class, 'x1p5oq8j') and contains(@class, 'xxbr6pl') and contains(@class, 'xwxc41k') and contains(@class, 'xbbxn1n')])[last()]"))
+                    )
+                    # print the content of last div
+                    logging.info(f"[Threads] Last div content: {last_div.text}")
+                    # Find the first div within the last div that has role="button" and tabindex="0"
+                    button = last_div.find_element(By.XPATH, ".//div[@role='button' and @tabindex='0']")
+                    # Use ActionChains to move to the element and click with a small delay
+                    actions = ActionChains(driver)
+                    actions.move_to_element(button)
+                    time.sleep(random.uniform(0.01, 0.2))  # Random delay between 0.1 seconds
+                    actions.click(button).perform()
+                    logging.info("[Threads] Cookie banner button clicked using ActionChains")
+                except Exception as e:
+                    logging.error(f"[Threads] Error clicking cookie banner button with ActionChains.")
+            else:
+                time.sleep(0.7)
+
+
+            # 1.b scroll a little bit
+            nb_scrolls = random.randint(1, 3)
+            for _ in range(nb_scrolls):
+                driver.execute_script ("window.scrollTo(0, Math.floor(Math.random() * 500) + 200);")
+                # random wait between 2 and 5 seconds
+                delay = round(random.uniform(1, 2.1),2)
+                time.sleep(delay)
+            
+            logging.info("[Threads] Scrolling done, waiting for search button to be clickable")
+
+            # Wait for the search button to be clickable
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    search_button = WebDriverWait(driver, 1).until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, "a[href='/search']"))
+                    )
+                    logging.info("[Threads] Search button is clickable ***")
+                    search_button.click()
+                    break
+                except TimeoutException:
+                    if attempt == max_retries - 1:
+                        raise
+                    print(f"Attempt {attempt + 1} failed, retrying...")
+
+            # 3. Click on the search button
+            search_button.click()
+            logging.info("[Threads] Clicked on the search button")
+            logging.info(f"[Threads] Current URL: {driver.current_url}")
+            # 3.a Wait for the URL to change to the search page
+            WebDriverWait(driver, 5).until(
+                EC.url_to_be("https://www.threads.net/search")
+            )
+            logging.info("[Threads] URL changed to the search page")
+
+            # 4. TYPE THE SEARCH KEYWORD ORGANICALLY
+            time.sleep(random.uniform(0.01, 0.1))
+            # find the first <input class="x1i10hfl x9f619 xggy1nq x1s07b3s x1kdt53j x1a2a7pz x1ggkfyp x972fbf xcfux6l x1qhh985 xm0m39n xp07o12 x1i0vuye xjohtrz x5yr21d x1yc453h xh8yej3 x1e899rk x1bn1fsv xtilpmw x1ad04t7 x1glnyev x1ix68h3 x19gujb8" dir="ltr" autocapitalize="off" autocomplete="off" placeholder="Search" spellcheck="false" type="search" value="" tabindex="0"> 
+            # look for the first "input" element with  type="search"
+            try:
+                search_input = driver.find_element(By.CSS_SELECTOR, "input[type='search']")
+                search_input.click()
+                # type the search keyword with a delay between each character of 0.05s & 0.15s
+                for letter in search_keyword:
+                    search_input.send_keys(letter)
+                    time.sleep(random.uniform(0.04, 0.25))
+                search_input.send_keys(Keys.RETURN)
+            except:
+                print("No parent form element found.")
+
+            time.sleep(random.uniform(0.2, 2))
+            # 4.b scroll a little bit
+            nb_scrolls = random.randint(1, 6)
+            for _ in range(nb_scrolls):
+                driver.execute_script ("window.scrollTo(0, Math.floor(Math.random() * 600) + 340);")
+                # random wait between 0 and 1 seconds
+                delay = round(random.uniform(1, 2.1),2)
+                time.sleep(delay)
             
             # Your automation code goes here
             posts = find_posts(driver)
@@ -374,7 +474,7 @@ async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
                 consecutive_misses += 1
                 # if we have 3 consecutive misses, we stop, sleep randomly between 3 and 10 seconds
                 if consecutive_misses >= 3:
-                    await asyncio.sleep(random.randint(3, 10))
+                    await time.sleep(random.randint(1, 2))
                     break
                 continue
 
@@ -398,4 +498,3 @@ async def query(parameters: dict) -> AsyncGenerator[Dict[str, Any], None]:
         logging.exception(f"[Threads] Error processing posts: {e}")
     finally:
         driver.quit()
-    
