@@ -37,7 +37,7 @@ ONLINE_KW_LIST_URL = "https://raw.githubusercontent.com/exorde-labs/TestnetProto
 BASE_THREADS_URL = "https://www.threads.net"  # Replace with your desired URL
 # Full URL looks like https://www.threads.net/search?q=btc&filter=recent
 DEFAULT_OLDNESS_SECONDS = 3600
-DEFAULT_MAXIMUM_ITEMS = 20
+DEFAULT_MAXIMUM_ITEMS = 200
 DEFAULT_MIN_POST_LENGTH = 10
 
 
