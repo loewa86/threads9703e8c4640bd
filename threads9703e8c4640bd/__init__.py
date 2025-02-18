@@ -172,13 +172,13 @@ def delete_org_files_in_tmp():
 
 
 def delete_core_files():
-    current_folder = "/exorde/"
+    current_folder = "/tmp/"
     target_prefix = "core."
     # delete all files in /exorde/ that are starting with core.* (no extension)
     try:
         # check if the /exorde/ folder exists
         if not os.path.exists(current_folder):
-            logging.info(f"[Threads browser Cache] Error: The directory '/exorde/' does not exist.")
+            logging.info(f"[Threads browser Cache] Error: The directory '/tmp/' does not exist.")
             return
         
         # iterate through the files in /exorde/ folder
